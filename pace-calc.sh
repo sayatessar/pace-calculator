@@ -82,6 +82,71 @@ validate_time() {
     fi
 }
 
+# ── Framework selector ────────────────────────────────────────────────────────
+select_framework() {
+    echo -e "${BOLD}Select effort zone framework:${RESET}"
+    echo -e "  ${YELLOW}[1]${RESET} General / Fixed Thresholds"
+    echo -e "       ${CYAN}Simple universal pace brackets (default)${RESET}"
+    echo -e "  ${YELLOW}[2]${RESET} Jack Daniels' VDOT Zones"
+    echo -e "       ${CYAN}Based on physiological training zones (Easy / Marathon / Threshold / Interval / Repetition)${RESET}"
+    echo -e "  ${YELLOW}[3]${RESET} Heart Rate Zone Model (5-Zone, pace proxy)"
+    echo -e "       ${CYAN}HR zone equivalents approximated via pace (assumes average recreational runner)${RESET}"
+    echo -e "  ${YELLOW}[4]${RESET} RPE – Rate of Perceived Exertion (1–10)"
+    echo -e "       ${CYAN}How hard it feels, mapped to pace${RESET}"
+    echo ""
+    while true; do
+        read -rp "$(echo -e "${YELLOW}Choose framework [1–4] (default: 1): ${RESET}")" FW_CHOICE
+        FW_CHOICE="${FW_CHOICE:-1}"
+        if [[ "$FW_CHOICE" =~ ^[1-4]$ ]]; then
+            FRAMEWORK="$FW_CHOICE"
+            return
+        fi
+        echo -e "${RED}  ❌ Invalid choice. Please enter 1–4.${RESET}"
+    done
+}
+
+# ── Get zone label based on framework ─────────────────────────────────────────
+get_zone() {
+    local pace=$1
+    local fw=$2
+
+    case "$fw" in
+        1)  # General / Fixed Thresholds
+            FW_NAME="General / Fixed Thresholds"
+            if   [[ $pace -le 210 ]]; then ZONE="${RED}🔥 Elite / Race Pace${RESET}"
+            elif [[ $pace -le 270 ]]; then ZONE="${YELLOW}💨 Fast / Threshold${RESET}"
+            elif [[ $pace -le 330 ]]; then ZONE="${GREEN}🏃 Moderate / Tempo${RESET}"
+            elif [[ $pace -le 420 ]]; then ZONE="${BLUE}🚶 Easy / Aerobic${RESET}"
+            else                           ZONE="${CYAN}🐢 Recovery / Walk-Run${RESET}"
+            fi ;;
+        2)  # Jack Daniels' VDOT
+            FW_NAME="Jack Daniels' VDOT Zones"
+            if   [[ $pace -le 180 ]]; then ZONE="${RED}🔥 R – Repetition (Speed/Economy)${RESET}"
+            elif [[ $pace -le 228 ]]; then ZONE="${YELLOW}💨 I – Interval (VO2max)${RESET}"
+            elif [[ $pace -le 270 ]]; then ZONE="${YELLOW}🎯 T – Threshold (Lactate)${RESET}"
+            elif [[ $pace -le 330 ]]; then ZONE="${GREEN}🏅 M – Marathon Pace${RESET}"
+            elif [[ $pace -le 420 ]]; then ZONE="${BLUE}🚶 E – Easy / Long Run${RESET}"
+            else                           ZONE="${CYAN}🐢 Recovery${RESET}"
+            fi ;;
+        3)  # Heart Rate Zone Model
+            FW_NAME="Heart Rate Zone Model (5-Zone, pace proxy)"
+            if   [[ $pace -le 210 ]]; then ZONE="${RED}🔥 Zone 5 – Max / Anaerobic (90–100% HRmax)${RESET}"
+            elif [[ $pace -le 252 ]]; then ZONE="${YELLOW}💨 Zone 4 – Hard / Threshold (80–90% HRmax)${RESET}"
+            elif [[ $pace -le 312 ]]; then ZONE="${GREEN}🏃 Zone 3 – Moderate / Aerobic (70–80% HRmax)${RESET}"
+            elif [[ $pace -le 390 ]]; then ZONE="${BLUE}🚶 Zone 2 – Easy / Fat Burn (60–70% HRmax)${RESET}"
+            else                           ZONE="${CYAN}🐢 Zone 1 – Recovery (<60% HRmax)${RESET}"
+            fi ;;
+        4)  # RPE
+            FW_NAME="RPE – Rate of Perceived Exertion (1–10)"
+            if   [[ $pace -le 210 ]]; then ZONE="${RED}🔥 RPE 9–10 – Maximum / All-out effort${RESET}"
+            elif [[ $pace -le 255 ]]; then ZONE="${YELLOW}💨 RPE 7–8 – Very hard, limited speech${RESET}"
+            elif [[ $pace -le 315 ]]; then ZONE="${GREEN}🏃 RPE 5–6 – Challenging but sustainable${RESET}"
+            elif [[ $pace -le 405 ]]; then ZONE="${BLUE}🚶 RPE 3–4 – Comfortable, conversational${RESET}"
+            else                           ZONE="${CYAN}🐢 RPE 1–2 – Very light, warm-up/recovery${RESET}"
+            fi ;;
+    esac
+}
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 print_banner
 
@@ -89,10 +154,14 @@ print_banner
 if [[ $# -eq 2 ]]; then
     DISTANCE_INPUT="$1"
     FINISH_TIME="$2"
+    FRAMEWORK="1"   # default when using CLI args
 elif [[ $# -eq 0 ]]; then
     echo -e "${BOLD}Supported distances:${RESET} 5K / 10K / HM / FM"
     read -rp "$(echo -e "${YELLOW}Enter distance: ${RESET}")" DISTANCE_INPUT
     read -rp "$(echo -e "${YELLOW}Enter finish time (HH:MM:SS): ${RESET}")" FINISH_TIME
+    echo ""
+    select_framework
+    echo ""
 else
     print_usage
     exit 1
@@ -171,19 +240,9 @@ echo -e "  └─ Half (HM): $(format_time $SPLIT_HM_SEC)"
 echo ""
 
 # ── Effort zone estimate ──────────────────────────────────────────────────────
-if [[ $PACE_SEC_KM -le 210 ]]; then          # ≤ 3:30/km
-    ZONE="${RED}🔥 Elite / Race Pace${RESET}"
-elif [[ $PACE_SEC_KM -le 270 ]]; then        # ≤ 4:30/km
-    ZONE="${YELLOW}💨 Fast / Threshold${RESET}"
-elif [[ $PACE_SEC_KM -le 330 ]]; then        # ≤ 5:30/km
-    ZONE="${GREEN}🏃 Moderate / Tempo${RESET}"
-elif [[ $PACE_SEC_KM -le 420 ]]; then        # ≤ 7:00/km
-    ZONE="${BLUE}🚶 Easy / Aerobic${RESET}"
-else
-    ZONE="${CYAN}🐢 Recovery / Walk-Run${RESET}"
-fi
+get_zone "$PACE_SEC_KM" "$FRAMEWORK"
 
-echo -e "${CYAN}${BOLD}  🎯 EFFORT ZONE${RESET}"
+echo -e "${CYAN}${BOLD}  🎯 EFFORT ZONE  ${RESET}${BOLD}(${FW_NAME})${RESET}"
 echo -e "  └─ ${ZONE}"
 echo ""
 echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
